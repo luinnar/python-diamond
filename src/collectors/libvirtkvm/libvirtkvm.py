@@ -99,6 +99,28 @@ as cummulative nanoseconds since VM creation if this is True."""
                                      instance=instance)
         self.publish(statname, metric, instance=instance)
 
+    def report_cpu_usage_metric(self, statname, value, instance, cpu_count=1):
+
+        path = self.get_metric_path(statname, instance=instance)
+        value = float(value)
+
+        if path in self.last_values:
+            curr_usage = float(value - self.last_values[path])
+
+            if curr_usage < 0:
+                # possible VM restart between measurements
+                curr_usage = value
+
+            # maximum available CPU time on VM in <interval> seconds
+            # cpu_count * interval_seconds * nanoseconds_in_second
+            max_usage = float(self.config['interval']) * float(cpu_count) * 1000000000.0
+            metric = round(curr_usage / max_usage * 100.0, 2)
+        else:
+            metric = 0
+
+        self.last_values[path] = value
+        self.publish(statname, metric, instance=instance)
+
     def collect(self):
         if libvirt is None:
             self.log.error('Unable to import libvirt')
@@ -118,9 +140,12 @@ as cummulative nanoseconds since VM creation if this is True."""
             for vcpu in vcpus:
                 cputime = vcpu['cpu_time']
                 self.report_cpu_metric('cpu.%s.time' % idx, cputime, name)
+                self.report_cpu_usage_metric('cpu.%s.usage' % idx, cputime, name)
                 idx += 1
                 totalcpu += cputime
+
             self.report_cpu_metric('cpu.total.time', totalcpu, name)
+            self.report_cpu_usage_metric('cpu.total.usage', totalcpu, name, cpu_count=idx)
 
             # Disk stats
             disks = self.get_disk_devices(dom)
